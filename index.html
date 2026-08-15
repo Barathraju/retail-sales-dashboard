@@ -16,8 +16,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <!-- PapaParse for CSV parsing -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-  <!-- jsPDF for PDF export -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-indigo-500 selection:text-white pb-12">
   <div id="root"></div>
@@ -25,15 +23,21 @@
   <script type="text/babel">
     const { useState, useMemo, useEffect, useRef } = React;
 
-    // --- UTILS: SANITIZER & KEY NORMALIZER (csvParser.ts) ---
-    const normalizeKey = (key) => key.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    // --- ENHANCED SANITIZERS & CSV HELPERS ---
+    const normalizeKey = (key) => String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
     const getRowValue = (row, candidateKeys, fallback = '') => {
+      if (!row) return fallback;
       const keys = Object.keys(row);
       for (const cand of candidateKeys) {
         const normCand = normalizeKey(cand);
         for (const k of keys) {
-          if (normalizeKey(k) === normCand) return row[k];
+          if (normalizeKey(k) === normCand) {
+            const val = row[k];
+            if (val !== null && val !== undefined && String(val).trim() !== '') {
+              return val;
+            }
+          }
         }
       }
       return fallback;
@@ -46,77 +50,49 @@
       return isNaN(num) ? fallback : num;
     };
 
-    // --- MOCK DATA GENERATOR (mockData.ts) ---
+    // --- MOCK DATASETS ---
     const SAMPLE_STORE_MASTER = [
-      { store_id: 'STR-101', store_name: 'Metro Grand Flagship', region: 'North', city: 'New York', store_format: 'Flagship', sq_ft: 45000, store_manager: 'Eleanor Vance' },
-      { store_id: 'STR-102', store_name: 'Downtown Plaza Express', region: 'North', city: 'Boston', store_format: 'Express', sq_ft: 12000, store_manager: 'Marcus Chen' },
-      { store_id: 'STR-103', store_name: 'Liberty Supercenter', region: 'North', city: 'Philadelphia', store_format: 'Supercenter', sq_ft: 38000, store_manager: 'Rachel Adams' },
-      { store_id: 'STR-104', store_name: 'Bayside Hypermarket', region: 'South', city: 'Miami', store_format: 'Hypermarket', sq_ft: 52000, store_manager: 'Carlos Rodriguez' },
-      { store_id: 'STR-105', store_name: 'Peachtree Galleria', region: 'South', city: 'Atlanta', store_format: 'Flagship', sq_ft: 40000, store_manager: 'Jasmine Taylor' },
-      { store_id: 'STR-106', store_name: 'Lone Star Supercenter', region: 'South', city: 'Dallas', store_format: 'Supercenter', sq_ft: 48000, store_manager: 'Austin Miller' },
-      { store_id: 'STR-107', store_name: 'Pacific Crest Outlet', region: 'West', city: 'Seattle', store_format: 'Outlet', sq_ft: 22000, store_manager: 'Chloe Bennett' },
-      { store_id: 'STR-108', store_name: 'Silicon Valley Hub', region: 'West', city: 'San Francisco', store_format: 'Flagship', sq_ft: 35000, store_manager: 'David Kim' },
-      { store_id: 'STR-109', store_name: 'Desert Oasis Express', region: 'West', city: 'Phoenix', store_format: 'Express', sq_ft: 14000, store_manager: 'Samantha Ortiz' },
-      { store_id: 'STR-110', store_name: 'Windy City Hypermarket', region: 'Central', city: 'Chicago', store_format: 'Hypermarket', sq_ft: 55000, store_manager: 'Robert Kowalski' }
+      { store_id: 'STR-101', store_name: 'Metro Grand Flagship', region: 'North', city: 'New York', store_format: 'Flagship' },
+      { store_id: 'STR-102', store_name: 'Downtown Plaza Express', region: 'North', city: 'Boston', store_format: 'Express' },
+      { store_id: 'STR-103', store_name: 'Liberty Supercenter', region: 'North', city: 'Philadelphia', store_format: 'Supercenter' },
+      { store_id: 'STR-104', store_name: 'Bayside Hypermarket', region: 'South', city: 'Miami', store_format: 'Hypermarket' },
+      { store_id: 'STR-105', store_name: 'Peachtree Galleria', region: 'South', city: 'Atlanta', store_format: 'Flagship' },
+      { store_id: 'STR-106', store_name: 'Lone Star Supercenter', region: 'South', city: 'Dallas', store_format: 'Supercenter' },
+      { store_id: 'STR-107', store_name: 'Pacific Crest Outlet', region: 'West', city: 'Seattle', store_format: 'Outlet' },
+      { store_id: 'STR-108', store_name: 'Silicon Valley Hub', region: 'West', city: 'San Francisco', store_format: 'Flagship' },
+      { store_id: 'STR-109', store_name: 'Desert Oasis Express', region: 'West', city: 'Phoenix', store_format: 'Express' },
+      { store_id: 'STR-110', store_name: 'Windy City Hypermarket', region: 'Central', city: 'Chicago', store_format: 'Hypermarket' }
     ];
 
     const CATEGORIES = ['Apparel & Fashion', 'Consumer Electronics', 'Groceries & Fresh', 'Home & Kitchen', 'Beauty & Personal Care', 'Footwear & Accessories'];
-    const WEEKS = ['Week 01', 'Week 02', 'Week 03', 'Week 04', 'Week 05', 'Week 06', 'Week 07', 'Week 08', 'Week 09', 'Week 10', 'Week 11', 'Week 12'];
+    const WEEKS = ['Week 01', 'Week 02', 'Week 03', 'Week 04', 'Week 05', 'Week 06', 'Week 07', 'Week 08'];
 
     function generateSampleWeeklySales() {
       const sales = [];
-      const storeFactors = {
-        'STR-101': { baseVolume: 1.45, targetMultiplier: 1.08, returnBias: 1.1, stockoutBias: 0.7 },
-        'STR-102': { baseVolume: 0.65, targetMultiplier: 0.92, returnBias: 0.8, stockoutBias: 1.4 },
-        'STR-103': { baseVolume: 1.15, targetMultiplier: 1.02, returnBias: 0.9, stockoutBias: 0.9 },
-        'STR-104': { baseVolume: 1.55, targetMultiplier: 1.12, returnBias: 1.0, stockoutBias: 0.6 },
-        'STR-105': { baseVolume: 1.25, targetMultiplier: 1.05, returnBias: 1.2, stockoutBias: 0.8 },
-        'STR-106': { baseVolume: 1.30, targetMultiplier: 0.95, returnBias: 0.9, stockoutBias: 1.2 },
-        'STR-107': { baseVolume: 0.85, targetMultiplier: 0.86, returnBias: 1.3, stockoutBias: 1.5 },
-        'STR-108': { baseVolume: 1.40, targetMultiplier: 1.10, returnBias: 1.1, stockoutBias: 0.5 },
-        'STR-109': { baseVolume: 0.55, targetMultiplier: 0.82, returnBias: 0.8, stockoutBias: 1.8 },
-        'STR-110': { baseVolume: 1.60, targetMultiplier: 1.06, returnBias: 0.9, stockoutBias: 0.7 }
-      };
-
-      const categoryParams = {
-        'Apparel & Fashion': { baseGross: 24000, discountRate: 0.14, returnRate: 0.135, baseTxn: 420, stockoutBase: 45 },
-        'Consumer Electronics': { baseGross: 38000, discountRate: 0.08, returnRate: 0.112, baseTxn: 180, stockoutBase: 30 },
-        'Groceries & Fresh': { baseGross: 42000, discountRate: 0.05, returnRate: 0.021, baseTxn: 950, stockoutBase: 80 },
-        'Home & Kitchen': { baseGross: 21000, discountRate: 0.12, returnRate: 0.068, baseTxn: 310, stockoutBase: 35 },
-        'Beauty & Personal Care': { baseGross: 16000, discountRate: 0.09, returnRate: 0.042, baseTxn: 480, stockoutBase: 25 },
-        'Footwear & Accessories': { baseGross: 19000, discountRate: 0.15, returnRate: 0.124, baseTxn: 290, stockoutBase: 50 }
-      };
-
-      WEEKS.forEach((week, weekIdx) => {
-        const weekMultiplier = 1 + Math.sin((weekIdx / 11) * Math.PI) * 0.18;
+      WEEKS.forEach((week) => {
         SAMPLE_STORE_MASTER.forEach((store) => {
-          const sFactor = storeFactors[store.store_id] || { baseVolume: 1.0, targetMultiplier: 1.0, returnBias: 1.0, stockoutBias: 1.0 };
           CATEGORIES.forEach((cat) => {
-            const cParam = categoryParams[cat];
-            const hash = (weekIdx * 37 + store.store_id.charCodeAt(5) * 19 + cat.charCodeAt(0) * 11) % 100;
-            const variance = 0.9 + (hash / 500);
-            const gross_sales = Math.round(cParam.baseGross * sFactor.baseVolume * weekMultiplier * variance);
-            const discount_amount = Math.round(gross_sales * (cParam.discountRate * (0.85 + (hash % 30) / 100)));
-            const actualReturnRate = Math.min(0.25, cParam.returnRate * sFactor.returnBias * (0.9 + (hash % 20) / 100));
-            const return_amount = Math.round((gross_sales - discount_amount) * actualReturnRate);
-            const net_sales = gross_sales - discount_amount - return_amount;
-            const target_sales = Math.round((net_sales / sFactor.targetMultiplier) * (0.96 + (hash % 10) / 100));
-            const transactions = Math.round(cParam.baseTxn * sFactor.baseVolume * (0.92 + (hash % 16) / 100));
-            const inventory_units = Math.round(transactions * 3.5 + (hash * 4));
-            const stockout_units = Math.max(0, Math.round(cParam.stockoutBase * sFactor.stockoutBias * (0.7 + (hash % 60) / 50)));
+            const gross = Math.round(18000 + Math.random() * 22000);
+            const disc = Math.round(gross * 0.08);
+            const ret = Math.round(gross * 0.05);
+            const net = gross - disc - ret;
+            const target = Math.round(net * (0.9 + Math.random() * 0.2));
+            const txns = Math.round(140 + Math.random() * 250);
+            const inv = Math.round(400 + Math.random() * 800);
+            const stockout = Math.round(Math.random() * 70);
 
             sales.push({
               week,
               store_id: store.store_id,
               category: cat,
-              gross_sales,
-              discount_amount,
-              return_amount,
-              net_sales,
-              target_sales,
-              transactions,
-              inventory_units,
-              stockout_units
+              gross_sales: gross,
+              discount_amount: disc,
+              return_amount: ret,
+              net_sales: net,
+              target_sales: target,
+              transactions: txns,
+              inventory_units: inv,
+              stockout_units: stockout
             });
           });
         });
@@ -126,26 +102,31 @@
 
     const SAMPLE_WEEKLY_SALES = generateSampleWeeklySales();
 
-    // --- MERGE DATASETS ENGINE (csvParser.ts) ---
+    // --- MERGE DATASETS ENGINE ---
     function mergeAndValidateDatasets(storeMasters, weeklySales) {
       const storeMap = new Map();
       storeMasters.forEach(s => storeMap.set(String(s.store_id).toLowerCase(), s));
 
-      const mergedData = weeklySales.map(sale => {
+      return weeklySales.map(sale => {
         const store = storeMap.get(String(sale.store_id).toLowerCase()) || {
           store_id: sale.store_id,
-          store_name: `Store (${sale.store_id})`,
-          region: 'Unassigned',
-          city: 'Unknown',
-          store_format: 'Standard',
-          sq_ft: 0,
-          store_manager: 'N/A'
+          store_name: sale.store_name || `Store (${sale.store_id})`,
+          region: sale.region || 'Unassigned',
+          city: sale.city || 'Unknown',
+          store_format: sale.store_format || 'Standard'
         };
 
-        const achievement_rate = sale.target_sales > 0 ? (sale.net_sales / sale.target_sales) * 100 : 0;
-        const return_rate = sale.net_sales > 0 ? (sale.return_amount / sale.net_sales) * 100 : 0;
-        const discount_rate = sale.gross_sales > 0 ? (sale.discount_amount / sale.gross_sales) * 100 : 0;
-        const atv = sale.transactions > 0 ? sale.net_sales / sale.transactions : 0;
+        const net = safeNum(sale.net_sales);
+        const gross = safeNum(sale.gross_sales);
+        const target = safeNum(sale.target_sales);
+        const ret = safeNum(sale.return_amount);
+        const disc = safeNum(sale.discount_amount);
+        const txns = safeNum(sale.transactions);
+
+        const achievement_rate = target > 0 ? (net / target) * 100 : 0;
+        const return_rate = net > 0 ? (ret / net) * 100 : 0;
+        const discount_rate = gross > 0 ? (disc / gross) * 100 : 0;
+        const atv = txns > 0 ? net / txns : 0;
 
         return {
           ...sale,
@@ -153,19 +134,15 @@
           region: store.region,
           city: store.city,
           store_format: store.store_format,
-          sq_ft: store.sq_ft || 0,
-          store_manager: store.store_manager || 'N/A',
           achievement_rate,
           return_rate,
           discount_rate,
           atv
         };
       });
-
-      return mergedData;
     }
 
-    // --- CHART CANVAS COMPONENT ---
+    // --- CHART CANVAS RENDERER ---
     function RenderChart({ type, data, options }) {
       const canvasRef = useRef(null);
       const chartInstance = useRef(null);
@@ -182,46 +159,32 @@
       return <canvas ref={canvasRef} />;
     }
 
-    // --- MAIN APPLICATION COMPONENT (App.tsx) ---
+    // --- MAIN APPLICATION COMPONENT ---
     function App() {
       const [storeMaster, setStoreMaster] = useState(SAMPLE_STORE_MASTER);
       const [weeklySales, setWeeklySales] = useState(SAMPLE_WEEKLY_SALES);
 
-      // Global Filters State
       const [filters, setFilters] = useState({
         weeks: [],
         regions: [],
         stores: [],
-        cities: [],
-        formats: [],
-        categories: [],
-        searchQuery: ''
+        categories: []
       });
 
-      // Reactive Merged Dataset
       const mergedData = useMemo(() => {
         return mergeAndValidateDatasets(storeMaster, weeklySales);
       }, [storeMaster, weeklySales]);
 
-      // Filtering Pipeline
       const filteredRecords = useMemo(() => {
         return mergedData.filter(r => {
           if (filters.weeks.length > 0 && !filters.weeks.includes(r.week)) return false;
           if (filters.regions.length > 0 && !filters.regions.includes(r.region)) return false;
           if (filters.stores.length > 0 && !filters.stores.includes(r.store_id)) return false;
-          if (filters.cities.length > 0 && !filters.cities.includes(r.city)) return false;
-          if (filters.formats.length > 0 && !filters.formats.includes(r.store_format)) return false;
           if (filters.categories.length > 0 && !filters.categories.includes(r.category)) return false;
-          if (filters.searchQuery.trim()) {
-            const q = filters.searchQuery.toLowerCase();
-            const match = r.store_name.toLowerCase().includes(q) || r.store_id.toLowerCase().includes(q) || r.city.toLowerCase().includes(q) || r.category.toLowerCase().includes(q);
-            if (!match) return false;
-          }
           return true;
         });
       }, [mergedData, filters]);
 
-      // Dynamic Filter Dropdown Options
       const allWeeks = useMemo(() => Array.from(new Set(mergedData.map(r => r.week))).sort(), [mergedData]);
       const allRegions = useMemo(() => Array.from(new Set(mergedData.map(r => r.region))).sort(), [mergedData]);
       const availableStores = useMemo(() => {
@@ -229,15 +192,12 @@
         mergedData.forEach(r => map.set(r.store_id, { id: r.store_id, name: r.store_name }));
         return Array.from(map.values()).sort((a,b) => a.name.localeCompare(b.name));
       }, [mergedData]);
-      const allCities = useMemo(() => Array.from(new Set(mergedData.map(r => r.city))).sort(), [mergedData]);
-      const allFormats = useMemo(() => Array.from(new Set(mergedData.map(r => r.store_format))).sort(), [mergedData]);
       const allCategories = useMemo(() => Array.from(new Set(mergedData.map(r => r.category))).sort(), [mergedData]);
 
-      // Mandatory Calculations (analytics.ts)
+      // Strict Zero-Division Safe KPI Computation
       const kpi = useMemo(() => {
         let totalNetSales = 0, totalGrossSales = 0, totalTargetSales = 0;
         let totalTransactions = 0, totalReturnAmount = 0, totalDiscountAmount = 0;
-        let totalInventoryUnits = 0, totalStockoutUnits = 0;
 
         filteredRecords.forEach(r => {
           totalNetSales += safeNum(r.net_sales);
@@ -246,8 +206,6 @@
           totalTransactions += safeNum(r.transactions);
           totalReturnAmount += safeNum(r.return_amount);
           totalDiscountAmount += safeNum(r.discount_amount);
-          totalInventoryUnits += safeNum(r.inventory_units);
-          totalStockoutUnits += safeNum(r.stockout_units);
         });
 
         const overallAchievementRate = totalTargetSales > 0 ? (totalNetSales / totalTargetSales) * 100 : 0;
@@ -256,14 +214,18 @@
         const overallDiscountRate = totalGrossSales > 0 ? (totalDiscountAmount / totalGrossSales) * 100 : 0;
 
         return {
-          totalNetSales, totalGrossSales, totalTargetSales,
-          overallAchievementRate, atv, totalTransactions,
-          totalReturnAmount, overallReturnRate, totalDiscountAmount,
-          overallDiscountRate, totalStockoutUnits, recordCount: filteredRecords.length
+          totalNetSales,
+          totalGrossSales,
+          totalTargetSales,
+          overallAchievementRate,
+          atv,
+          overallReturnRate,
+          overallDiscountRate,
+          recordCount: filteredRecords.length
         };
       }, [filteredRecords]);
 
-      // Visual Chart Data Configurations
+      // Dynamic Weekly Chart Parser
       const weeklyTrendChartData = useMemo(() => {
         const map = new Map();
         filteredRecords.forEach(r => {
@@ -281,7 +243,6 @@
               data: sortedWeeks.map(w => map.get(w).net),
               borderColor: '#6366f1',
               backgroundColor: 'rgba(99, 102, 241, 0.15)',
-              borderWidth: 2.5,
               fill: true,
               tension: 0.35
             },
@@ -290,7 +251,6 @@
               data: sortedWeeks.map(w => map.get(w).target),
               borderColor: '#94a3b8',
               borderDash: [5, 5],
-              borderWidth: 2,
               fill: false
             }
           ]
@@ -309,54 +269,7 @@
         };
       }, [filteredRecords]);
 
-      const categoryChartData = useMemo(() => {
-        const map = new Map();
-        filteredRecords.forEach(r => {
-          map.set(r.category, (map.get(r.category) || 0) + safeNum(r.net_sales));
-        });
-        const cats = Array.from(map.keys());
-        return {
-          labels: cats,
-          datasets: [{
-            data: cats.map(c => map.get(c)),
-            backgroundColor: ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6']
-          }]
-        };
-      }, [filteredRecords]);
-
-      const storeLeaderboardData = useMemo(() => {
-        const map = new Map();
-        filteredRecords.forEach(r => {
-          const cur = map.get(r.store_name) || { net: 0, target: 0 };
-          cur.net += safeNum(r.net_sales);
-          cur.target += safeNum(r.target_sales);
-          map.set(r.store_name, cur);
-        });
-        const sorted = Array.from(map.entries()).sort((a,b) => b[1].net - a[1].net).slice(0, 8);
-        return {
-          labels: sorted.map(s => s[0]),
-          datasets: [{
-            label: 'Net Sales ($)',
-            data: sorted.map(s => s[1].net),
-            backgroundColor: sorted.map(s => (s[1].target > 0 && (s[1].net / s[1].target) >= 1 ? '#10b981' : '#f59e0b')),
-            borderRadius: 4
-          }]
-        };
-      }, [filteredRecords]);
-
-      const stockoutRiskData = useMemo(() => {
-        const map = new Map();
-        filteredRecords.forEach(r => {
-          map.set(r.category, (map.get(r.category) || 0) + safeNum(r.stockout_units));
-        });
-        const cats = Array.from(map.keys());
-        return {
-          labels: cats,
-          datasets: [{ label: 'Stockout Lost Units', data: cats.map(c => map.get(c)), backgroundColor: '#ef4444', borderRadius: 6 }]
-        };
-      }, [filteredRecords]);
-
-      // CSV Upload Integration Logic (DataIntegrationModal.tsx)
+      // Ultra-Resilient Sales CSV Upload Parser
       const handleSalesUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -364,25 +277,40 @@
           header: true,
           skipEmptyLines: true,
           complete: (results) => {
-            const parsedSales = results.data.map((r) => {
-              const gross = safeNum(getRowValue(r, ['gross_sales', 'gross', 'revenue']), 0);
-              const disc = safeNum(getRowValue(r, ['discount_amount', 'discount']), 0);
+            const parsedSales = results.data.map((r, idx) => {
+              const week = String(getRowValue(r, ['week', 'week_number', 'period', 'wk'], `Week ${String(idx + 1).padStart(2, '0')}`));
+              const store_id = String(getRowValue(r, ['store_id', 'storeid', 'id', 'store'], 'STR-101'));
+              const category = String(getRowValue(r, ['category', 'department', 'dept', 'cat'], 'General'));
+              
+              const gross = safeNum(getRowValue(r, ['gross_sales', 'gross', 'revenue', 'gross_revenue']), 0);
+              const disc = safeNum(getRowValue(r, ['discount_amount', 'discount', 'disc']), 0);
               const ret = safeNum(getRowValue(r, ['return_amount', 'returns', 'refunds']), 0);
-              let net = safeNum(getRowValue(r, ['net_sales', 'net']), 0);
-              if (net === 0 && gross > 0) net = Math.max(0, gross - disc - ret);
+              
+              let net = safeNum(getRowValue(r, ['net_sales', 'net', 'sales']), 0);
+              if (net === 0 && gross > 0) {
+                net = Math.max(0, gross - disc - ret);
+              }
+
+              // Fallback target: if missing or invalid, default to net_sales so achievement evaluates near 100% instead of dividing by 0
+              let target = safeNum(getRowValue(r, ['target_sales', 'target', 'quota']), 0);
+              if (target <= 0) target = net > 0 ? net : 1000;
+
+              const txns = safeNum(getRowValue(r, ['transactions', 'txns', 'orders', 'footfall']), 100);
+              const inv = safeNum(getRowValue(r, ['inventory_units', 'inventory', 'stock']), 0);
+              const stockout = safeNum(getRowValue(r, ['stockout_units', 'stockouts']), 0);
 
               return {
-                week: String(getRowValue(r, ['week', 'week_number', 'period'], 'Week 01')),
-                store_id: String(getRowValue(r, ['store_id', 'storeid', 'id'], 'STR-101')),
-                category: String(getRowValue(r, ['category', 'department'], 'General')),
+                week,
+                store_id,
+                category,
                 gross_sales: gross,
                 discount_amount: disc,
                 return_amount: ret,
                 net_sales: net,
-                target_sales: safeNum(getRowValue(r, ['target_sales', 'target', 'quota']), net * 1.05),
-                transactions: safeNum(getRowValue(r, ['transactions', 'txns', 'orders']), 100),
-                inventory_units: safeNum(getRowValue(r, ['inventory_units', 'inventory']), 0),
-                stockout_units: safeNum(getRowValue(r, ['stockout_units', 'stockouts']), 0)
+                target_sales: target,
+                transactions: txns,
+                inventory_units: inv,
+                stockout_units: stockout
               };
             });
             setWeeklySales(parsedSales);
@@ -390,6 +318,7 @@
         });
       };
 
+      // Resilient Store Master CSV Upload Parser
       const handleStoresUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -402,55 +331,25 @@
               store_name: String(getRowValue(r, ['store_name', 'storename', 'name'], 'Store')),
               region: String(getRowValue(r, ['region', 'zone'], 'Other')),
               city: String(getRowValue(r, ['city', 'location'], 'Unknown')),
-              store_format: String(getRowValue(r, ['store_format', 'format'], 'Standard')),
-              sq_ft: safeNum(getRowValue(r, ['sq_ft', 'sqft']), 0),
-              store_manager: String(getRowValue(r, ['store_manager', 'manager'], 'Unassigned'))
+              store_format: String(getRowValue(r, ['store_format', 'format', 'type'], 'Standard'))
             }));
             setStoreMaster(parsedStores);
           }
         });
       };
 
-      // Export CSV (exportUtils.ts)
       const handleExportCSV = () => {
         const csv = Papa.unparse(filteredRecords);
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `retail_sales_filtered_export_${new Date().toISOString().split('T')[0]}.csv`;
+        a.download = `retail_sales_filtered_export.csv`;
         a.click();
       };
 
-      // Automated Insights Synthesis
-      const insights = useMemo(() => {
-        const catMap = new Map();
-        filteredRecords.forEach(r => {
-          const cur = catMap.get(r.category) || { net: 0, ret: 0 };
-          cur.net += safeNum(r.net_sales);
-          cur.ret += safeNum(r.return_amount);
-          catMap.set(r.category, cur);
-        });
-        const highReturnCats = Array.from(catMap.entries())
-          .map(([cat, v]) => ({ cat, rate: v.net > 0 ? (v.ret / v.net) * 100 : 0 }))
-          .filter(c => c.rate > 10.0);
-
-        const storeMap = new Map();
-        filteredRecords.forEach(r => {
-          const cur = storeMap.get(r.store_name) || { net: 0, target: 0, region: r.region };
-          cur.net += safeNum(r.net_sales);
-          cur.target += safeNum(r.target_sales);
-          storeMap.set(r.store_name, cur);
-        });
-        const missingStores = Array.from(storeMap.entries())
-          .map(([name, v]) => ({ name, region: v.region, ach: v.target > 0 ? (v.net / v.target) * 100 : 0 }))
-          .filter(s => s.ach < 99.5);
-
-        return { highReturnCats, missingStores };
-      }, [filteredRecords]);
-
       return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-5 space-y-5">
+        <div className="max-w-7xl mx-auto px-4 pt-5 space-y-5">
           {/* Header Bar */}
           <header className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4 shadow-md">
             <div>
@@ -460,22 +359,22 @@
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition">
+              <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold transition">
                 Upload sales CSV
                 <input type="file" accept=".csv" onChange={handleSalesUpload} className="hidden" />
               </label>
-              <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-700 transition">
+              <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 transition">
                 Upload stores CSV
                 <input type="file" accept=".csv" onChange={handleStoresUpload} className="hidden" />
               </label>
-              <button onClick={handleExportCSV} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition">
-                Export Filtered CSV
+              <button onClick={handleExportCSV} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold transition">
+                Export CSV
               </button>
             </div>
           </header>
 
-          {/* Global Dynamic Filter Bar */}
-          <section className="bg-slate-900 border border-slate-800 p-4 rounded-2xl grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 shadow-md">
+          {/* Filters Bar */}
+          <section className="bg-slate-900 border border-slate-800 p-4 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-3 shadow-md">
             <div>
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Week ({allWeeks.length})</label>
               <select onChange={(e) => setFilters(prev => ({ ...prev, weeks: e.target.value === 'ALL' ? [] : [e.target.value] }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
@@ -498,20 +397,6 @@
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-slate-400 mb-1">City ({allCities.length})</label>
-              <select onChange={(e) => setFilters(prev => ({ ...prev, cities: e.target.value === 'ALL' ? [] : [e.target.value] }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
-                <option value="ALL">All Cities</option>
-                {allCities.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-400 mb-1">Format ({allFormats.length})</label>
-              <select onChange={(e) => setFilters(prev => ({ ...prev, formats: e.target.value === 'ALL' ? [] : [e.target.value] }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
-                <option value="ALL">All Formats</option>
-                {allFormats.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </div>
-            <div>
               <label className="block text-[11px] font-medium text-slate-400 mb-1">Category ({allCategories.length})</label>
               <select onChange={(e) => setFilters(prev => ({ ...prev, categories: e.target.value === 'ALL' ? [] : [e.target.value] }))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
                 <option value="ALL">All Categories</option>
@@ -520,7 +405,7 @@
             </div>
           </section>
 
-          {/* Mandatory KPI Cards Grid */}
+          {/* KPI Cards Grid */}
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm border-l-4 border-indigo-500">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Net Sales</span>
@@ -547,83 +432,12 @@
           {/* Charts Grid */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Weekly Sales Trend</h3>
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Weekly Sales Trend ({allWeeks.length} Weeks)</h3>
               <div className="h-64"><RenderChart type="line" data={weeklyTrendChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Sales by Region</h3>
               <div className="h-64"><RenderChart type="bar" data={regionalChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Category Performance Share</h3>
-              <div className="h-64 flex justify-center"><RenderChart type="doughnut" data={categoryChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Store Leaderboard (Top 8)</h3>
-              <div className="h-64"><RenderChart type="bar" data={storeLeaderboardData} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }} /></div>
-            </div>
-            <div className="col-span-1 lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2">Stockout Risk Indicator by Category</h3>
-              <div className="h-52"><RenderChart type="bar" data={stockoutRiskData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
-            </div>
-          </section>
-
-          {/* Automated Business Insight Summary */}
-          <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
-            <h2 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Automated Business Insight Summary</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                <span className="font-semibold text-emerald-400 block mb-1">High Return Categories (&gt;10% Threshold):</span>
-                <span>{insights.highReturnCats.length > 0 ? insights.highReturnCats.map(c => `${c.cat} (${c.rate.toFixed(1)}%)`).join(', ') : 'All categories within 10% tolerance.'}</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                <span className="font-semibold text-amber-400 block mb-1">Stores Missing Quota Target:</span>
-                <span>{insights.missingStores.length} stores trailing quota (e.g., {insights.missingStores.slice(0, 3).map(s => `${s.name} [${s.ach.toFixed(1)}%]`).join(', ')}).</span>
-              </div>
-              <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                <span className="font-semibold text-indigo-300 block mb-1">Strategic Operations Focus:</span>
-                <span>Replenish stockout buffers in top categories and audit return QC procedures for flagged product lines.</span>
-              </div>
-            </div>
-          </section>
-
-          {/* Merged Data Records Explorer */}
-          <section className="bg-slate-900 border border-slate-800 rounded-2xl shadow-lg overflow-hidden">
-            <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Merged Sales & Store Master Records ({filteredRecords.length.toLocaleString()})</h3>
-              <button onClick={handleExportCSV} className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold">Download CSV</button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[11px]">
-                  <tr>
-                    <th className="py-3 px-3">Week</th>
-                    <th className="py-3 px-3">Store Name</th>
-                    <th className="py-3 px-3">Region</th>
-                    <th className="py-3 px-3">Category</th>
-                    <th className="py-3 px-3 text-right">Net Sales</th>
-                    <th className="py-3 px-3 text-right">Return %</th>
-                    <th className="py-3 px-3 text-center">% Target Met</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-sans">
-                  {filteredRecords.slice(0, 10).map((r, idx) => (
-                    <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-2.5 px-3 font-mono text-indigo-300 font-semibold">{r.week}</td>
-                      <td className="py-2.5 px-3 text-white font-medium">{r.store_name} <span className="text-[10px] text-slate-500 font-mono">({r.store_id})</span></td>
-                      <td className="py-2.5 px-3">{r.region}</td>
-                      <td className="py-2.5 px-3">{r.category}</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-white font-mono">${safeNum(r.net_sales).toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-rose-400">{r.return_rate.toFixed(1)}%</td>
-                      <td className="py-2.5 px-3 text-center font-mono">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${r.achievement_rate >= 100 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>
-                          {r.achievement_rate.toFixed(1)}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </section>
         </div>
