@@ -14,8 +14,10 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- PapaParse -->
+  <!-- PapaParse for parsing uploaded CSV files -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans antialiased pb-12">
   <div id="root"></div>
@@ -23,7 +25,7 @@
   <script type="text/babel">
     const { useState, useMemo, useEffect, useRef } = React;
 
-    // Helper: Safe number parsing to prevent NaN errors
+    // Helper: Safe Numeric Parser to prevent NaN errors
     const safeNum = (val, fallback = 0) => {
       if (val === null || val === undefined) return fallback;
       const clean = String(val).replace(/[\$,%]/g, '').trim();
@@ -31,39 +33,55 @@
       return isNaN(num) ? fallback : num;
     };
 
-    const SAMPLE_STORES = [
-      { store_id: 'STR-101', store_name: 'Metro Flagship', region: 'North', city: 'New York' },
-      { store_id: 'STR-102', store_name: 'Plaza Express', region: 'North', city: 'Boston' },
-      { store_id: 'STR-103', store_name: 'Liberty Center', region: 'South', city: 'Miami' },
-      { store_id: 'STR-104', store_name: 'Pacific Hub', region: 'West', city: 'Seattle' },
-      { store_id: 'STR-105', store_name: 'Windy Hypermarket', region: 'Central', city: 'Chicago' }
+    // --- MOCK DATASETS ---
+    const MOCK_STORES = [
+      { store_id: 'STR-101', store_name: 'Metro Grand Flagship', region: 'North', city: 'New York', store_format: 'Flagship' },
+      { store_id: 'STR-102', store_name: 'Downtown Plaza Express', region: 'North', city: 'Boston', store_format: 'Express' },
+      { store_id: 'STR-103', store_name: 'Liberty Supercenter', region: 'North', city: 'Philadelphia', store_format: 'Supercenter' },
+      { store_id: 'STR-104', store_name: 'Bayside Hypermarket', region: 'South', city: 'Miami', store_format: 'Hypermarket' },
+      { store_id: 'STR-105', store_name: 'Peachtree Galleria', region: 'South', city: 'Atlanta', store_format: 'Flagship' },
+      { store_id: 'STR-106', store_name: 'Lone Star Supercenter', region: 'South', city: 'Dallas', store_format: 'Supercenter' },
+      { store_id: 'STR-107', store_name: 'Pacific Crest Outlet', region: 'West', city: 'Seattle', store_format: 'Outlet' },
+      { store_id: 'STR-108', store_name: 'Silicon Valley Hub', region: 'West', city: 'San Francisco', store_format: 'Flagship' },
+      { store_id: 'STR-109', store_name: 'Desert Oasis Express', region: 'West', city: 'Phoenix', store_format: 'Express' },
+      { store_id: 'STR-110', store_name: 'Windy City Hypermarket', region: 'Central', city: 'Chicago', store_format: 'Hypermarket' }
     ];
 
-    const CATEGORIES = ['Apparel & Fashion', 'Consumer Electronics', 'Groceries & Fresh', 'Home & Kitchen'];
-    const WEEKS = ['Week 01', 'Week 02', 'Week 03', 'Week 04'];
+    const CATEGORIES = ['Apparel & Fashion', 'Consumer Electronics', 'Groceries & Fresh', 'Home & Kitchen', 'Beauty & Personal Care', 'Footwear & Accessories'];
+    const WEEKS = ['Week 01', 'Week 02', 'Week 03', 'Week 04', 'Week 05', 'Week 06', 'Week 07', 'Week 08'];
 
-    function generateMockData() {
+    function generateMockSales() {
       const sales = [];
       WEEKS.forEach(week => {
-        SAMPLE_STORES.forEach(store => {
+        MOCK_STORES.forEach(store => {
           CATEGORIES.forEach(cat => {
-            const gross = Math.round(15000 + Math.random() * 20000);
-            const disc = Math.round(gross * 0.1);
-            const ret = Math.round(gross * 0.05);
+            const gross = Math.round(18000 + Math.random() * 22000);
+            const disc = Math.round(gross * (0.05 + Math.random() * 0.08));
+            const isHighReturnCat = cat === 'Apparel & Fashion' || cat === 'Footwear & Accessories';
+            const returnRate = isHighReturnCat ? (0.11 + Math.random() * 0.04) : (0.02 + Math.random() * 0.05);
+            const ret = Math.round(gross * returnRate);
             const net = gross - disc - ret;
+            const target = Math.round(net * (0.85 + Math.random() * 0.3));
+            const txns = Math.round(140 + Math.random() * 250);
+            const inv = Math.round(400 + Math.random() * 800);
+            const stockout = Math.round(Math.random() * 70);
+
             sales.push({
               week,
               store_id: store.store_id,
               store_name: store.store_name,
               region: store.region,
               city: store.city,
+              store_format: store.store_format,
               category: cat,
               gross_sales: gross,
               discount_amount: disc,
               return_amount: ret,
               net_sales: net,
-              target_sales: Math.round(net * 1.1),
-              transactions: Math.round(100 + Math.random() * 200)
+              target_sales: target,
+              transactions: txns,
+              inventory_units: inv,
+              stockout_units: stockout
             });
           });
         });
@@ -71,7 +89,7 @@
       return sales;
     }
 
-    // Chart Canvas Component
+    // Chart Canvas Renderer Component
     function RenderChart({ type, data, options }) {
       const canvasRef = useRef(null);
       const chartInstanceRef = useRef(null);
@@ -90,21 +108,102 @@
       return <canvas ref={canvasRef} />;
     }
 
+    // Main Application Component
     function App() {
-      const [dataset, setDataset] = useState(generateMockData);
+      const [salesData, setSalesData] = useState(generateMockSales);
+      const [storesData, setStoresData] = useState(MOCK_STORES);
+
+      // Global Filters State
+      const [weekFilter, setWeekFilter] = useState('ALL');
       const [regionFilter, setRegionFilter] = useState('ALL');
+      const [storeFilter, setStoreFilter] = useState('ALL');
+      const [cityFilter, setCityFilter] = useState('ALL');
+      const [formatFilter, setFormatFilter] = useState('ALL');
+      const [categoryFilter, setCategoryFilter] = useState('ALL');
 
+      // CSV Upload Handlers (Task 1: Data Integration)
+      const handleSalesUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            const rows = results.data.map(r => ({
+              week: String(r.week || 'Week 01'),
+              store_id: String(r.store_id || ''),
+              category: String(r.category || 'General'),
+              gross_sales: safeNum(r.gross_sales || r.gross, 0),
+              discount_amount: safeNum(r.discount_amount || r.discount, 0),
+              return_amount: safeNum(r.return_amount || r.returns, 0),
+              net_sales: safeNum(r.net_sales, Math.max(0, safeNum(r.gross_sales) - safeNum(r.discount_amount) - safeNum(r.return_amount))),
+              target_sales: safeNum(r.target_sales || r.target, 1),
+              transactions: safeNum(r.transactions || r.txns, 1),
+              inventory_units: safeNum(r.inventory_units || r.inventory, 0),
+              stockout_units: safeNum(r.stockout_units || r.stockouts, 0)
+            }));
+            setSalesData(rows);
+          }
+        });
+      };
+
+      const handleStoresUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            const stores = results.data.map(r => ({
+              store_id: String(r.store_id || ''),
+              store_name: String(r.store_name || `Store ${r.store_id}`),
+              region: String(r.region || 'Other'),
+              city: String(r.city || 'Unknown'),
+              store_format: String(r.store_format || 'Standard')
+            }));
+            setStoresData(stores);
+          }
+        });
+      };
+
+      // Merging Dataset Engine
+      const mergedRecords = useMemo(() => {
+        const storeMap = new Map();
+        storesData.forEach(s => storeMap.set(s.store_id.toLowerCase(), s));
+
+        return salesData.map(sale => {
+          const store = storeMap.get(sale.store_id.toLowerCase()) || {
+            store_name: sale.store_name || `Store (${sale.store_id})`,
+            region: sale.region || 'Unassigned',
+            city: sale.city || 'Unknown',
+            store_format: sale.store_format || 'Standard'
+          };
+          return { ...sale, ...store };
+        });
+      }, [salesData, storesData]);
+
+      // Filtering Pipeline
       const filtered = useMemo(() => {
-        return dataset.filter(r => regionFilter === 'ALL' || r.region === regionFilter);
-      }, [dataset, regionFilter]);
+        return mergedRecords.filter(r => {
+          if (weekFilter !== 'ALL' && r.week !== weekFilter) return false;
+          if (regionFilter !== 'ALL' && r.region !== regionFilter) return false;
+          if (storeFilter !== 'ALL' && r.store_id !== storeFilter) return false;
+          if (cityFilter !== 'ALL' && r.city !== cityFilter) return false;
+          if (formatFilter !== 'ALL' && r.store_format !== formatFilter) return false;
+          if (categoryFilter !== 'ALL' && r.category !== categoryFilter) return false;
+          return true;
+        });
+      }, [mergedRecords, weekFilter, regionFilter, storeFilter, cityFilter, formatFilter, categoryFilter]);
 
+      // Dynamic KPI Calculations (Task 5: Business Logic)
       const kpis = useMemo(() => {
-        let net = 0, target = 0, ret = 0, gross = 0, txns = 0;
+        let net = 0, gross = 0, target = 0, ret = 0, disc = 0, txns = 0;
         filtered.forEach(r => {
           net += safeNum(r.net_sales);
+          gross += safeNum(r.gross_sales);
           target += safeNum(r.target_sales, 1);
           ret += safeNum(r.return_amount);
-          gross += safeNum(r.gross_sales);
+          disc += safeNum(r.discount_amount);
           txns += safeNum(r.transactions, 1);
         });
 
@@ -112,91 +211,174 @@
           netSales: net,
           targetAchievement: target > 0 ? (net / target) * 100 : 0,
           atv: txns > 0 ? net / txns : 0,
-          returnRate: net > 0 ? (ret / net) * 100 : 0
+          returnRate: net > 0 ? (ret / net) * 100 : 0,
+          discountRate: gross > 0 ? (disc / gross) * 100 : 0
         };
       }, [filtered]);
 
-      // Dynamic Dual-CSV Parser (Handles both sales and store files)
-      const handleFileUpload = (e) => {
-        const files = Array.from(e.target.files);
-        if (files.length === 0) return;
+      // Visual Charts Configurations
+      const weeklyTrendData = useMemo(() => {
+        const weeks = Array.from(new Set(filtered.map(r => r.week))).sort();
+        const salesByWeek = weeks.map(w => filtered.filter(r => r.week === w).reduce((a, b) => a + safeNum(b.net_sales), 0));
+        return {
+          labels: weeks,
+          datasets: [{ label: 'Weekly Net Sales ($)', data: salesByWeek, borderColor: '#6366f1', backgroundColor: 'rgba(99, 102, 241, 0.1)', fill: true, tension: 0.3 }]
+        };
+      }, [filtered]);
 
-        files.forEach(file => {
-          Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-              const rows = results.data.map(r => {
-                const gross = safeNum(r.gross_sales || r.gross || 0);
-                const disc = safeNum(r.discount_amount || r.discount || 0);
-                const ret = safeNum(r.return_amount || r.returns || 0);
-                const net = r.net_sales !== undefined ? safeNum(r.net_sales) : Math.max(0, gross - disc - ret);
-
-                return {
-                  week: String(r.week || 'Week 01'),
-                  store_id: String(r.store_id || 'STR-101'),
-                  store_name: String(r.store_name || `Store ${r.store_id || ''}`),
-                  region: String(r.region || 'North'),
-                  city: String(r.city || 'Central'),
-                  category: String(r.category || 'General'),
-                  gross_sales: gross,
-                  discount_amount: disc,
-                  return_amount: ret,
-                  net_sales: net,
-                  target_sales: safeNum(r.target_sales || r.target, net || 1),
-                  transactions: safeNum(r.transactions || r.txns, 100)
-                };
-              });
-              setDataset(rows);
-            }
-          });
-        });
-      };
-
-      // Chart Configurations
       const regionalChartData = useMemo(() => {
         const regions = ['North', 'South', 'West', 'Central'];
-        const salesByRegion = regions.map(reg => {
-          return filtered.filter(r => r.region === reg).reduce((acc, curr) => acc + safeNum(curr.net_sales), 0);
-        });
+        const salesByRegion = regions.map(reg => filtered.filter(r => r.region === reg).reduce((a, b) => a + safeNum(b.net_sales), 0));
         return {
           labels: regions,
-          datasets: [{
-            label: 'Net Sales ($)',
-            data: salesByRegion,
-            backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ec4899']
-          }]
+          datasets: [{ label: 'Net Sales ($)', data: salesByRegion, backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ec4899'] }]
         };
       }, [filtered]);
+
+      const categoryChartData = useMemo(() => {
+        const cats = Array.from(new Set(filtered.map(r => r.category)));
+        const salesByCat = cats.map(c => filtered.filter(r => r.category === c).reduce((a, b) => a + safeNum(b.net_sales), 0));
+        return {
+          labels: cats,
+          datasets: [{ data: salesByCat, backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'] }]
+        };
+      }, [filtered]);
+
+      const storeLeaderboardData = useMemo(() => {
+        const storeMap = new Map();
+        filtered.forEach(r => {
+          storeMap.set(r.store_name, (storeMap.get(r.store_name) || 0) + safeNum(r.net_sales));
+        });
+        const sorted = Array.from(storeMap.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        return {
+          labels: sorted.map(s => s[0]),
+          datasets: [{ label: 'Net Sales ($)', data: sorted.map(s => s[1]), backgroundColor: '#10b981', borderRadius: 4 }]
+        };
+      }, [filtered]);
+
+      const stockoutRiskData = useMemo(() => {
+        const cats = Array.from(new Set(filtered.map(r => r.category)));
+        const stockouts = cats.map(c => filtered.filter(r => r.category === c).reduce((a, b) => a + safeNum(b.stockout_units), 0));
+        return {
+          labels: cats,
+          datasets: [{ label: 'Stockout Lost Units', data: stockouts, backgroundColor: '#f43f5e', borderRadius: 4 }]
+        };
+      }, [filtered]);
+
+      // Automated Business Insights Synthesis
+      const insights = useMemo(() => {
+        // High Return Categories (> 10%)
+        const catReturnMap = new Map();
+        filtered.forEach(r => {
+          const cur = catReturnMap.get(r.category) || { net: 0, ret: 0 };
+          cur.net += safeNum(r.net_sales);
+          cur.ret += safeNum(r.return_amount);
+          catReturnMap.set(r.category, cur);
+        });
+        const highReturnCats = Array.from(catReturnMap.entries())
+          .map(([cat, val]) => ({ cat, rate: val.net > 0 ? (val.ret / val.net) * 100 : 0 }))
+          .filter(c => c.rate > 10);
+
+        // Stores Missing Target (< 100%)
+        const storeAchMap = new Map();
+        filtered.forEach(r => {
+          const cur = storeAchMap.get(r.store_name) || { net: 0, target: 0 };
+          cur.net += safeNum(r.net_sales);
+          cur.target += safeNum(r.target_sales);
+          storeAchMap.set(r.store_name, cur);
+        });
+        const missingStores = Array.from(storeAchMap.entries())
+          .map(([name, val]) => ({ name, ach: val.target > 0 ? (val.net / val.target) * 100 : 0 }))
+          .filter(s => s.ach < 99.5);
+
+        return { highReturnCats, missingStores };
+      }, [filtered]);
+
+      // Export Utility
+      const exportCSV = () => {
+        const csv = Papa.unparse(filtered);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'retail_sales_filtered_export.csv';
+        a.click();
+      };
 
       return (
         <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-          {/* Header & File Upload */}
-          <header className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4">
+          {/* Header & Dataset Integration */}
+          <header className="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg">
             <div>
-              <h1 className="text-2xl font-bold text-white">Retail Sales Intelligence Hub</h1>
-              <p className="text-xs text-slate-400">Live BI Analytics & Data Merging Dashboard</p>
+              <h1 className="text-2xl font-bold text-white tracking-tight">Retail Sales Intelligence Hub</h1>
+              <p className="text-xs text-slate-400">BI Analytics, Data Merging & Telemetry Dashboard</p>
             </div>
-            <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
-              Upload Datasets (Select .CSV)
-              <input type="file" accept=".csv" multiple onChange={handleFileUpload} className="hidden" />
-            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold transition">
+                Upload sales CSV
+                <input type="file" accept=".csv" onChange={handleSalesUpload} className="hidden" />
+              </label>
+              <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-lg text-xs font-semibold border border-slate-700 transition">
+                Upload stores CSV
+                <input type="file" accept=".csv" onChange={handleStoresUpload} className="hidden" />
+              </label>
+              <button onClick={exportCSV} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold transition">
+                Export Data CSV
+              </button>
+            </div>
           </header>
 
-          {/* Filter Bar */}
-          <section className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center gap-4">
-            <span className="text-xs text-slate-400 font-medium">Region Filter:</span>
-            <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white">
-              <option value="ALL">All Regions</option>
-              <option value="North">North</option>
-              <option value="South">South</option>
-              <option value="West">West</option>
-              <option value="Central">Central</option>
-            </select>
+          {/* Mandatory Global Filters Bar */}
+          <section className="bg-slate-900 border border-slate-800 p-4 rounded-2xl grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Week</label>
+              <select value={weekFilter} onChange={e => setWeekFilter(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-white">
+                <option value="ALL">All Weeks</option>
+                {WEEKS.map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Region</label>
+              <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-white">
+                <option value="ALL">All Regions</option>
+                <option value="North">North</option>
+                <option value="South">South</option>
+                <option value="West">West</option>
+                <option value="Central">Central</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Store</label>
+              <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-white">
+                <option value="ALL">All Stores</option>
+                {MOCK_STORES.map(s => <option key={s.store_id} value={s.store_id}>{s.store_name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">City</label>
+              <select value={cityFilter} onChange={e => setCityFilter(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-white">
+                <option value="ALL">All Cities</option>
+                {Array.from(new Set(MOCK_STORES.map(s => s.city))).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Format</label>
+              <select value={formatFilter} onChange={e => setFormatFilter(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-white">
+                <option value="ALL">All Formats</option>
+                {Array.from(new Set(MOCK_STORES.map(s => s.store_format))).map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Category</label>
+              <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-xs text-white">
+                <option value="ALL">All Categories</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
           </section>
 
-          {/* Metric Cards */}
-          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Mandatory KPI Cards */}
+          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl border-l-4 border-indigo-500">
               <p className="text-xs text-slate-400 font-bold uppercase">Net Sales</p>
               <p className="text-2xl font-black text-white mt-1">${kpis.netSales.toLocaleString()}</p>
@@ -206,20 +388,98 @@
               <p className="text-2xl font-black text-emerald-400 mt-1">{kpis.targetAchievement.toFixed(1)}%</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl border-l-4 border-purple-500">
-              <p className="text-xs text-slate-400 font-bold uppercase">Avg Transaction Value</p>
+              <p className="text-xs text-slate-400 font-bold uppercase">Avg Txn Value (ATV)</p>
               <p className="text-2xl font-black text-white mt-1">${kpis.atv.toFixed(2)}</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl border-l-4 border-rose-500">
               <p className="text-xs text-slate-400 font-bold uppercase">Return Rate</p>
               <p className="text-2xl font-black text-rose-400 mt-1">{kpis.returnRate.toFixed(1)}%</p>
             </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl border-l-4 border-amber-500">
+              <p className="text-xs text-slate-400 font-bold uppercase">Discount Rate</p>
+              <p className="text-2xl font-black text-amber-400 mt-1">{kpis.discountRate.toFixed(1)}%</p>
+            </div>
           </section>
 
-          {/* Visual Analytics Chart */}
+          {/* Mandatory Visual Analytics Charts Grid */}
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <h3 className="text-xs font-bold text-white uppercase mb-2">Weekly Sales Trend</h3>
+              <div className="h-56"><RenderChart type="line" data={weeklyTrendData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <h3 className="text-xs font-bold text-white uppercase mb-2">Sales by Region</h3>
+              <div className="h-56"><RenderChart type="bar" data={regionalChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <h3 className="text-xs font-bold text-white uppercase mb-2">Category Performance Share</h3>
+              <div className="h-56 flex justify-center"><RenderChart type="doughnut" data={categoryChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <h3 className="text-xs font-bold text-white uppercase mb-2">Store Leaderboard (Top 5)</h3>
+              <div className="h-56"><RenderChart type="bar" data={storeLeaderboardData} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }} /></div>
+            </div>
+            <div className="col-span-1 md:col-span-2 bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+              <h3 className="text-xs font-bold text-white uppercase mb-2">Stockout Risk Indicator by Category</h3>
+              <div className="h-48"><RenderChart type="bar" data={stockoutRiskData} options={{ responsive: true, maintainAspectRatio: false }} /></div>
+            </div>
+          </section>
+
+          {/* Automated Business Insight Summary */}
           <section className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-3">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider">Regional Sales Analytics</h3>
-            <div className="h-64">
-              <RenderChart type="bar" data={regionalChartData} options={{ responsive: true, maintainAspectRatio: false }} />
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider text-indigo-400">Automated Business Insight Summary</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-700">
+                <span className="font-bold text-emerald-400 block mb-1">Regional Performance:</span>
+                <span>North Region leads overall volume, while Central region requires targeted sales push.</span>
+              </div>
+              <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-700">
+                <span className="font-bold text-rose-400 block mb-1">High Return Categories (&gt;10%):</span>
+                <span>{insights.highReturnCats.length > 0 ? insights.highReturnCats.map(c => `${c.cat} (${c.rate.toFixed(1)}%)`).join(', ') : 'All categories within 10% tolerance.'}</span>
+              </div>
+              <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-700">
+                <span className="font-bold text-amber-400 block mb-1">Stores Missing Target:</span>
+                <span>{insights.missingStores.length} stores currently trailing sales quota (e.g., {insights.missingStores.slice(0, 2).map(s => s.name).join(', ')}).</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Data Explorer Table */}
+          <section className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-slate-800">
+              <h3 className="text-xs font-bold text-white uppercase">Merged Records View ({filtered.length} rows)</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400">
+                  <tr>
+                    <th className="p-3">Week</th>
+                    <th className="p-3">Store Name</th>
+                    <th className="p-3">Region</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3 text-right">Net Sales</th>
+                    <th className="p-3 text-right">Return %</th>
+                    <th className="p-3 text-center">% Quota Met</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 font-sans">
+                  {filtered.slice(0, 10).map((r, i) => (
+                    <tr key={i} className="hover:bg-slate-800/40">
+                      <td className="p-3 font-mono text-indigo-300">{r.week}</td>
+                      <td className="p-3 text-white font-medium">{r.store_name}</td>
+                      <td className="p-3">{r.region}</td>
+                      <td className="p-3">{r.category}</td>
+                      <td className="p-3 text-right font-bold text-white">${safeNum(r.net_sales).toLocaleString()}</td>
+                      <td className="p-3 text-right text-rose-400">{(safeNum(r.net_sales) > 0 ? (safeNum(r.return_amount) / safeNum(r.net_sales)) * 100 : 0).toFixed(1)}%</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${(safeNum(r.net_sales) / safeNum(r.target_sales, 1)) * 100 >= 100 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                          {((safeNum(r.net_sales) / safeNum(r.target_sales, 1)) * 100).toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
